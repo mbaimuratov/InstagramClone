@@ -1,7 +1,6 @@
 package com.example.android.instagramclone.data
 
 import android.net.Uri
-import android.util.Log
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
@@ -18,8 +17,10 @@ import kotlin.collections.HashMap
 
 class FirebaseRepositoryImpl(
     private val storage: FirebaseStorage,
-    private val database: FirebaseDatabase
+    database: FirebaseDatabase
 ) : FirebaseRepository {
+
+    private val postsNodeRef = database.getReference("Posts")
 
     @ExperimentalCoroutinesApi
     override suspend fun fetchPosts() = callbackFlow<Result<List<Post>>> {
@@ -37,12 +38,10 @@ class FirebaseRepositoryImpl(
             }
         }
 
-        val postRef = database.getReference("Posts")
-
-        postRef.addListenerForSingleValueEvent(postListener)
+        postsNodeRef.addListenerForSingleValueEvent(postListener)
 
         awaitClose {
-            postRef.removeEventListener(postListener)
+            postsNodeRef.removeEventListener(postListener)
         }
     }
 
@@ -61,21 +60,23 @@ class FirebaseRepositoryImpl(
                 imageRef.downloadUrl
             }.addOnCompleteListener { task ->
                 if (task.isSuccessful) {
-                    val downloadUrl = task.result.toString()
-
-                    val postRef = database.reference.child("Posts")
-                    val postId = postRef.push().key
+                    val postId = postsNodeRef.push().key
 
                     val postMap = HashMap<String, Any>()
                     postMap["post_id"] = postId!!
                     postMap["post_description"] = description
-                    postMap["post_image_url"] = downloadUrl
+                    postMap["post_image_url"] = task.result.toString()
+                    postMap["post_has_like"] = false
 
-                    postRef.child(postId).updateChildren(postMap)
-                        .addOnCompleteListener {
-                            Log.i("uploadPost", "$postId is updated")
-                        }
+                    postsNodeRef.child(postId).updateChildren(postMap)
                 }
             }
         }
+
+    override suspend fun likePost(isChecked: Boolean, postId: String?) {
+        withContext(Dispatchers.IO) {
+            val postRef = postsNodeRef.child(postId!!)
+            postRef.child("post_has_like").setValue(isChecked)
+        }
+    }
 }

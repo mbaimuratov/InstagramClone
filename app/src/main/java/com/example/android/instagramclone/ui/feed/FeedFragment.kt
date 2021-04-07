@@ -1,7 +1,11 @@
 package com.example.android.instagramclone.ui.feed
 
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.view.Menu
 import android.view.MenuInflater
 import android.view.MenuItem
@@ -12,16 +16,25 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.bumptech.glide.Glide
+import com.bumptech.glide.load.DataSource
+import com.bumptech.glide.load.engine.GlideException
+import com.bumptech.glide.request.RequestListener
+import com.bumptech.glide.request.target.Target
 import com.example.android.instagramclone.R
 import com.example.android.instagramclone.data.FirebaseRepositoryImpl
+import com.example.android.instagramclone.data.Post
 import com.example.android.instagramclone.databinding.FeedFragmentBinding
-import com.example.android.instagramclone.ui.addpost.AddPostViewModelFactory
+import com.example.android.instagramclone.ui.ViewModelFactory
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 
 
-class FeedFragment : Fragment(R.layout.feed_fragment) {
+class FeedFragment : Fragment(R.layout.feed_fragment), FeedAdapter.OnActionClickListener {
 
     private lateinit var viewModel: FeedViewModel
 
@@ -31,7 +44,7 @@ class FeedFragment : Fragment(R.layout.feed_fragment) {
 
     private lateinit var feedRvAdapter: FeedAdapter
 
-    private var mSavedQuery = ""
+    private var mSavedSearchQuery = ""
 
     @ExperimentalCoroutinesApi
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -41,30 +54,35 @@ class FeedFragment : Fragment(R.layout.feed_fragment) {
 
         initViewModel()
 
-        setOnClickListeners()
-
-        feedRvAdapter = FeedAdapter()
-
-        val layoutManager = LinearLayoutManager(activity)
-        layoutManager.reverseLayout = true
-        layoutManager.stackFromEnd = true
+        feedRvAdapter = FeedAdapter(this)
 
         viewModel.posts.observe(viewLifecycleOwner) { postList ->
             feedRvAdapter.submitList(postList)
 
-            val itemCount = postList.size - 1
+            val itemCount = postList.size
             if (itemCount > 0) {
                 binding.postsRecyclerview.smoothScrollToPosition(itemCount - 1)
             }
             binding.root.isRefreshing = false
         }
 
-        binding.postsRecyclerview.adapter = feedRvAdapter
-        binding.postsRecyclerview.layoutManager = layoutManager
-
-        setOnClickListeners()
-
+        //fetch posts
         viewModel.getPosts()
+
+        binding.apply {
+            root.setOnRefreshListener { viewModel.getPosts() }
+
+            postsRecyclerview.adapter = feedRvAdapter
+
+            val layoutManager = LinearLayoutManager(activity)
+            layoutManager.reverseLayout = true
+            layoutManager.stackFromEnd = true
+            postsRecyclerview.layoutManager = layoutManager
+
+            addPostFab.setOnClickListener {
+                findNavController().navigate(R.id.action_feedFragment_to_addPostFragment)
+            }
+        }
 
         setHasOptionsMenu(true)
     }
@@ -74,18 +92,9 @@ class FeedFragment : Fragment(R.layout.feed_fragment) {
             FirebaseStorage.getInstance(),
             FirebaseDatabase.getInstance()
         )
-        val factory = AddPostViewModelFactory(firebaseRepository)
+        val factory = ViewModelFactory(firebaseRepository)
 
         viewModel = ViewModelProvider(this, factory).get(FeedViewModel::class.java)
-    }
-
-    @ExperimentalCoroutinesApi
-    private fun setOnClickListeners() {
-        binding.addPostFab.setOnClickListener {
-            findNavController().navigate(R.id.action_feedFragment_to_addPostFragment)
-        }
-
-        binding.root.setOnRefreshListener { viewModel.getPosts() }
     }
 
     override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
@@ -101,7 +110,7 @@ class FeedFragment : Fragment(R.layout.feed_fragment) {
             override fun onMenuItemActionExpand(item: MenuItem?): Boolean {
                 mSearchView.requestFocus()
 
-                feedRvAdapter.filter.filter(mSavedQuery)
+                feedRvAdapter.filter.filter(mSavedSearchQuery)
 
                 val imm =
                     activity!!.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
@@ -117,7 +126,7 @@ class FeedFragment : Fragment(R.layout.feed_fragment) {
                     activity!!.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                 imm.hideSoftInputFromWindow(view!!.windowToken, 0)
 
-                mSavedQuery = mSearchView.query.toString()
+                mSavedSearchQuery = mSearchView.query.toString()
 
                 feedRvAdapter.disableFilterActive()
 
@@ -143,7 +152,6 @@ class FeedFragment : Fragment(R.layout.feed_fragment) {
                 }
 
                 val itemCount = feedRvAdapter.itemCount
-
                 if (itemCount > 0) {
                     binding.postsRecyclerview.smoothScrollToPosition(itemCount - 1)
                 }
@@ -151,6 +159,60 @@ class FeedFragment : Fragment(R.layout.feed_fragment) {
                 return true
             }
         })
+    }
+
+
+    override fun onLikeClicked(isChecked: Boolean, postId: String?) {
+        viewModel.likePost(isChecked, postId)
+    }
+
+    override fun onShareClicked(post: Post) {
+        Glide.with(requireContext())
+            .asBitmap()
+            .load(post.post_image_url)
+            .listener(object : RequestListener<Bitmap> {
+                override fun onLoadFailed(
+                    e: GlideException?,
+                    model: Any?,
+                    target: Target<Bitmap>?,
+                    isFirstResource: Boolean
+                ): Boolean {
+                    return false
+                }
+
+                override fun onResourceReady(
+                    resource: Bitmap?,
+                    model: Any?,
+                    target: Target<Bitmap>?,
+                    dataSource: DataSource?,
+                    isFirstResource: Boolean
+                ): Boolean {
+                    val shareIntent = Intent(Intent.ACTION_SEND)
+                    shareIntent.putExtra(Intent.EXTRA_TEXT, post.post_description)
+                    shareIntent.putExtra(Intent.EXTRA_STREAM, getLocalBitmapUri(resource!!))
+                    shareIntent.type = "image/*"
+                    shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    startActivity(Intent.createChooser(shareIntent, "send_to"))
+                    return false
+                }
+            }).submit()
+    }
+
+    private fun getLocalBitmapUri(bmp: Bitmap): Uri? {
+        var bmpUri: Uri? = null
+        try {
+            val file = File(
+                requireActivity().getExternalFilesDir(Environment.DIRECTORY_PICTURES),
+                "share_image_" + System.currentTimeMillis() + ".jpeg"
+            )
+            val out = FileOutputStream(file)
+            bmp.compress(Bitmap.CompressFormat.JPEG, 100, out)
+            out.close()
+            bmpUri = Uri.fromFile(file)
+        } catch (e: IOException) {
+            e.printStackTrace()
+        }
+        return bmpUri
     }
 
 }

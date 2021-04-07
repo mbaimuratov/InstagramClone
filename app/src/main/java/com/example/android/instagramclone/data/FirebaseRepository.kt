@@ -6,4 +6,5 @@ import kotlinx.coroutines.flow.Flow
 interface FirebaseRepository {
     suspend fun fetchPosts() : Flow<Result<List<Post>>>
     suspend fun uploadPost(description: String, imageUri: Uri)
+    suspend fun likePost(isChecked: Boolean, postId: String?)
 }

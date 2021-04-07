@@ -11,7 +11,9 @@ import com.example.android.instagramclone.databinding.PostItemBinding
 import java.util.*
 import kotlin.collections.ArrayList
 
-class FeedAdapter : RecyclerView.Adapter<FeedAdapter.PostViewHolder>(), Filterable {
+
+class FeedAdapter(private val actionClickListener: OnActionClickListener) :
+    RecyclerView.Adapter<FeedAdapter.PostViewHolder>(), Filterable {
 
     private var postList = mutableListOf<Post>()
 
@@ -19,15 +21,37 @@ class FeedAdapter : RecyclerView.Adapter<FeedAdapter.PostViewHolder>(), Filterab
 
     private var isFilterActive = false
 
-    class PostViewHolder(private val binding: PostItemBinding) :
+    inner class PostViewHolder(private val binding: PostItemBinding) :
         RecyclerView.ViewHolder(binding.root) {
         fun bind(post: Post) {
-            binding.postDescription.text = post.post_description
 
-            Glide.with(binding.postImage.context)
-                .load(post.post_image_url)
-                .into(binding.postImage)
+            binding.apply {
+                postDescription.text = post.post_description
+
+                Glide
+                    .with(postImage.context)
+                    .load(post.post_image_url)
+                    .into(postImage)
+
+                postLikeCb.setOnCheckedChangeListener(null)
+
+                postLikeCb.isChecked = post.post_has_like
+
+                postLikeCb.setOnCheckedChangeListener { _, isChecked ->
+                    actionClickListener.onLikeClicked(isChecked, post.post_id)
+                }
+
+                postShareBtn.setOnClickListener {
+                    actionClickListener.onShareClicked(post)
+                }
+
+            }
         }
+    }
+
+    interface OnActionClickListener {
+        fun onLikeClicked(isChecked: Boolean, postId: String?)
+        fun onShareClicked(post: Post)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PostViewHolder {

@@ -10,7 +10,11 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
-class FeedViewModel(private val firebaseRepository: FirebaseRepository) : ViewModel() {
+
+class FeedViewModel(
+    private val firebaseRepository: FirebaseRepository
+) :
+    ViewModel() {
 
     private val _posts = MutableLiveData<List<Post>>()
     val posts: LiveData<List<Post>> = _posts
@@ -29,6 +33,12 @@ class FeedViewModel(private val firebaseRepository: FirebaseRepository) : ViewMo
                     }
                 }
             }
+        }
+    }
+
+    fun likePost(checked: Boolean, postId: String?) {
+        viewModelScope.launch {
+            firebaseRepository.likePost(checked, postId)
         }
     }
 }
